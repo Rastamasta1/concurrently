@@ -8,6 +8,69 @@ import { CommandParser } from './command-parser.js';
 // Matches a negative filter surrounded by '(!' and ')'.
 const OMISSION = /\(!([^)]+)\)/;
 
+interface WildcardToken {
+    token: string;
+    start: number;
+    end: number;
+}
+
+/**
+ * Scans `command` character by character, tracking single- and double-quote state (a quote
+ * character toggles its own state; the other kind of quote is literal while inside it), and
+ * splits into whitespace-delimited tokens outside of quotes.
+ *
+ * Returns the first token that contains a `*`, has no part of it inside quotes, and does not
+ * start with `-`. Returns `null` if no such token exists.
+ */
+export function findWildcardToken(command: string): WildcardToken | null {
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let tokenStart = -1;
+    let hasWildcard = false;
+    let hasQuotedPortion = false;
+
+    const checkToken = (end: number): WildcardToken | null => {
+        if (tokenStart !== -1 && hasWildcard && !hasQuotedPortion) {
+            const token = command.slice(tokenStart, end);
+            if (!token.startsWith('-')) {
+                return { token, start: tokenStart, end };
+            }
+        }
+        return null;
+    };
+
+    for (let i = 0; i < command.length; i++) {
+        const char = command[i];
+
+        if (!inSingleQuote && !inDoubleQuote && /\s/.test(char)) {
+            const result = checkToken(i);
+            if (result) {
+                return result;
+            }
+            tokenStart = -1;
+            hasWildcard = false;
+            hasQuotedPortion = false;
+            continue;
+        }
+
+        if (tokenStart === -1) {
+            tokenStart = i;
+        }
+
+        if (!inDoubleQuote && char === "'") {
+            inSingleQuote = !inSingleQuote;
+            hasQuotedPortion = true;
+        } else if (!inSingleQuote && char === '"') {
+            inDoubleQuote = !inDoubleQuote;
+            hasQuotedPortion = true;
+        } else if (char === '*' && !inSingleQuote && !inDoubleQuote) {
+            hasWildcard = true;
+        }
+    }
+
+    return checkToken(command.length);
+}
+
 /**
  * Finds wildcards in 'npm/yarn/pnpm/bun run', 'node --run' and 'deno task'
  * commands and replaces them with all matching scripts in the NodeJS and Deno
@@ -46,12 +109,21 @@ export class ExpandWildcard implements CommandParser {
         }
     }
 
+    static readDir(dir: string): string[] {
+        try {
+            return fs.readdirSync(dir);
+        } catch {
+            return [];
+        }
+    }
+
     private packageScripts?: string[];
     private denoTasks?: string[];
 
     constructor(
         private readonly readDeno = ExpandWildcard.readDeno,
         private readonly readPackage = ExpandWildcard.readPackage,
+        private readonly readDir = ExpandWildcard.readDir,
     ) {}
 
     private relevantScripts(command: string): string[] {
