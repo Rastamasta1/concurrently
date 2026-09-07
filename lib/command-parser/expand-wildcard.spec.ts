@@ -412,6 +412,85 @@ describe(`with a 'deno task' prefix`, () => {
     });
 });
 
+describe('file wildcards', () => {
+    let fileWildcardParser: ExpandWildcard;
+    let readDirMock: Mock;
+
+    beforeEach(() => {
+        readDirMock = vi.fn();
+        fileWildcardParser = new ExpandWildcard(readDeno, readPackage, readDirMock);
+    });
+
+    it('expands an unquoted file wildcard into one command per matching directory entry', () => {
+        readDirMock.mockReturnValue([
+            'webpack.config.base.js',
+            'webpack.config.dev.js',
+            'webpack.config.prod.js',
+            'other.txt',
+        ]);
+
+        expect(
+            fileWildcardParser.parse(createCommandInfo('webpack --config webpack.config.*.js')),
+        ).toEqual([
+            { name: 'base', command: 'webpack --config webpack.config.base.js' },
+            { name: 'dev', command: 'webpack --config webpack.config.dev.js' },
+            { name: 'prod', command: 'webpack --config webpack.config.prod.js' },
+        ]);
+        expect(readDirMock).toHaveBeenCalledWith('.');
+    });
+
+    it('honours the (!...) omission syntax', () => {
+        readDirMock.mockReturnValue([
+            'webpack.config.base.js',
+            'webpack.config.dev.js',
+            'webpack.config.prod.js',
+            'other.txt',
+        ]);
+
+        expect(
+            fileWildcardParser.parse(
+                createCommandInfo('webpack --config webpack.config.*(!base).js'),
+            ),
+        ).toEqual([
+            { name: 'dev', command: 'webpack --config webpack.config.dev.js' },
+            { name: 'prod', command: 'webpack --config webpack.config.prod.js' },
+        ]);
+    });
+
+    it('reads through a directory prefix and keeps it in the resulting commands', () => {
+        readDirMock.mockReturnValue(['a.json', 'b.json']);
+
+        expect(fileWildcardParser.parse(createCommandInfo('cat configs/*.json'))).toEqual([
+            { name: 'a', command: 'cat configs/a.json' },
+            { name: 'b', command: 'cat configs/b.json' },
+        ]);
+        expect(readDirMock).toHaveBeenCalledWith('configs');
+    });
+
+    it('leaves a quoted wildcard untouched without reading a directory', () => {
+        const commandInfo = createCommandInfo('find . -name "*.js"');
+
+        expect(fileWildcardParser.parse(commandInfo)).toBe(commandInfo);
+        expect(readDirMock).not.toHaveBeenCalled();
+    });
+
+    it('returns the command unchanged when there are zero matches', () => {
+        readDirMock.mockReturnValue(['other.txt']);
+
+        const commandInfo = createCommandInfo('webpack --config webpack.config.*.js');
+        expect(fileWildcardParser.parse(commandInfo)).toBe(commandInfo);
+    });
+
+    it('still uses the script-runner branch for npm run wildcards', () => {
+        readPackage.mockReturnValue({ scripts: { 'build:js': '', 'build:css': '' } });
+
+        fileWildcardParser.parse(createCommandInfo('npm run build:*'));
+
+        expect(readPackage).toHaveBeenCalled();
+        expect(readDirMock).not.toHaveBeenCalled();
+    });
+});
+
 describe('findWildcardToken', () => {
     it('returns the first unquoted wildcard token with its offsets', () => {
         const command = 'webpack --config webpack.config.*.js';
