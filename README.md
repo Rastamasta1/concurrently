@@ -84,6 +84,7 @@ You can always check concurrently's flag list by running `concurrently --help`.
 For the version, run `concurrently --version`.
 
 Check out documentation and other usage examples in the [`docs` directory](./docs/README.md).
+Wildcards work for npm/yarn/pnpm/bun/node/deno script shortcuts and for matching files in a plain command — see [wildcard shortcuts](./docs/cli/shortcuts.md#file-wildcards) for details.
 
 ## API
 
