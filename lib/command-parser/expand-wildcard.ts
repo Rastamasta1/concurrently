@@ -154,10 +154,10 @@ export class ExpandWildcard implements CommandParser {
 
         const wildcardPosition = (scriptGlob || '').indexOf('*');
 
-        // If the regex didn't match an npm script, or it has no wildcard,
-        // then we have nothing to do here
+        // If the regex didn't match an npm/deno script, or it has no wildcard,
+        // then fall through to expanding a file wildcard instead.
         if (wildcardPosition === -1) {
-            return commandInfo;
+            return this.parseFileWildcard(commandInfo);
         }
 
         const [, omission] = OMISSION.exec(scriptGlob) || [];
@@ -190,5 +190,57 @@ export class ExpandWildcard implements CommandParser {
         }
 
         return commands;
+    }
+
+    /**
+     * Expands an unquoted file wildcard token (e.g. `webpack.config.*.js`) into one command per
+     * matching directory entry, honoring the same `(!...)` omission syntax as script wildcards.
+     *
+     * Returns `commandInfo` unchanged if there's no unquoted wildcard token in the command line,
+     * or if the token matches no directory entries.
+     */
+    private parseFileWildcard(commandInfo: CommandInfo): CommandInfo | CommandInfo[] {
+        const tokenInfo = findWildcardToken(commandInfo.command);
+        if (!tokenInfo) {
+            return commandInfo;
+        }
+
+        const { token, start, end } = tokenInfo;
+        const lastSlashIndex = token.lastIndexOf('/');
+        const directory = lastSlashIndex === -1 ? '.' : token.slice(0, lastSlashIndex);
+        const dirPrefix = lastSlashIndex === -1 ? '' : token.slice(0, lastSlashIndex + 1);
+        const pattern = lastSlashIndex === -1 ? token : token.slice(lastSlashIndex + 1);
+
+        const wildcardPosition = pattern.indexOf('*');
+        const [, omission] = OMISSION.exec(pattern) || [];
+        const patternSansOmission = pattern.replace(OMISSION, '');
+        const preWildcard = escapeRegExp(patternSansOmission.slice(0, wildcardPosition));
+        const postWildcard = escapeRegExp(patternSansOmission.slice(wildcardPosition + 1));
+        const wildcardRegex = new RegExp(`^${preWildcard}(.*?)${postWildcard}$`);
+        // If 'commandInfo.name' doesn't match the token, this means a custom name has been
+        // specified and thus becomes the prefix (as described in the README).
+        const prefix = commandInfo.name !== token ? commandInfo.name : '';
+
+        const entries = [...this.readDir(directory)].sort();
+        const commands: CommandInfo[] = [];
+
+        for (const entry of entries) {
+            if (omission && new RegExp(omission).test(entry)) {
+                continue;
+            }
+
+            const result = wildcardRegex.exec(entry);
+            const match = result?.[1];
+            if (match !== undefined) {
+                const command =
+                    commandInfo.command.slice(0, start) +
+                    dirPrefix +
+                    entry +
+                    commandInfo.command.slice(end);
+                commands.push({ ...commandInfo, command, name: prefix + match });
+            }
+        }
+
+        return commands.length ? commands : commandInfo;
     }
 }
