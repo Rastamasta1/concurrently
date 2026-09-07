@@ -71,3 +71,19 @@ $ concurrently -n js,ts 'yarn run lint:js' 'yarn run lint:ts'
 > If you use this syntax with double quotes (`"`), bash and other shells might fail
 > parsing it. You'll need to escape the `!`, or use single quote (`'`) instead.<br/>
 > See [here](https://serverfault.com/a/208266/160539) for more information.
+
+## File Wildcards
+
+Wildcards aren't limited to npm/yarn/pnpm/bun/node/deno script names. In a plain command, an unquoted `*` token in a file path expands to one command per matching file in that directory, using the same `(!<some pattern>)` omission syntax described above. The name of each spawned command is set to whatever the `*` wildcard matched, just like with script wildcards.
+
+```bash
+$ concurrently 'webpack --config webpack.config.*(!base).js'
+# spawns one webpack per matching config file, e.g. given
+# webpack.config.base.js, webpack.config.dev.js and webpack.config.prod.js:
+$ concurrently -n dev,prod 'webpack --config webpack.config.dev.js' 'webpack --config webpack.config.prod.js'
+```
+
+> [!NOTE]
+> A wildcard that's inside quotes (for example `find . -name "*.js"`) is passed through to the shell untouched, since concurrently only expands wildcards it can see in the unquoted parts of the command line.
+>
+> If a file wildcard matches zero files, the command is left as written instead of being dropped.
