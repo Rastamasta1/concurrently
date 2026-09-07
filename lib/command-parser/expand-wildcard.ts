@@ -9,6 +9,63 @@ import { CommandParser } from './command-parser.js';
 const OMISSION = /\(!([^)]+)\)/;
 
 /**
+ * Scans a command character by character, tracking single and double quote state (a quote
+ * character toggles its own state; the other kind is treated as a literal character while inside
+ * it), and splits into tokens on whitespace outside of quotes.
+ *
+ * Returns the first token that contains a '*', was entirely outside of quotes, and does not start
+ * with '-'; otherwise returns null.
+ */
+export function findWildcardToken(
+    command: string,
+): { token: string; start: number; end: number } | null {
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let tokenStart = -1;
+    let hasUnquotedWildcard = false;
+
+    const finishToken = (end: number): { token: string; start: number; end: number } | null => {
+        if (tokenStart === -1) {
+            return null;
+        }
+        const token = command.slice(tokenStart, end);
+        const result =
+            hasUnquotedWildcard && !token.startsWith('-')
+                ? { token, start: tokenStart, end }
+                : null;
+        tokenStart = -1;
+        hasUnquotedWildcard = false;
+        return result;
+    };
+
+    for (let i = 0; i < command.length; i++) {
+        const char = command[i];
+
+        if (/\s/.test(char) && !inSingleQuote && !inDoubleQuote) {
+            const result = finishToken(i);
+            if (result) {
+                return result;
+            }
+            continue;
+        }
+
+        if (tokenStart === -1) {
+            tokenStart = i;
+        }
+
+        if (char === "'" && !inDoubleQuote) {
+            inSingleQuote = !inSingleQuote;
+        } else if (char === '"' && !inSingleQuote) {
+            inDoubleQuote = !inDoubleQuote;
+        } else if (char === '*' && !inSingleQuote && !inDoubleQuote) {
+            hasUnquotedWildcard = true;
+        }
+    }
+
+    return finishToken(command.length);
+}
+
+/**
  * Finds wildcards in 'npm/yarn/pnpm/bun run', 'node --run' and 'deno task'
  * commands and replaces them with all matching scripts in the NodeJS and Deno
  * configuration files of the current directory.
@@ -46,12 +103,21 @@ export class ExpandWildcard implements CommandParser {
         }
     }
 
+    static readDir(dir: string): string[] {
+        try {
+            return fs.readdirSync(dir);
+        } catch {
+            return [];
+        }
+    }
+
     private packageScripts?: string[];
     private denoTasks?: string[];
 
     constructor(
         private readonly readDeno = ExpandWildcard.readDeno,
         private readonly readPackage = ExpandWildcard.readPackage,
+        private readonly readDir = ExpandWildcard.readDir,
     ) {}
 
     private relevantScripts(command: string): string[] {

@@ -3,7 +3,7 @@ import fs, { PathOrFileDescriptor } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, Mock, vi } from 'vitest';
 
 import { CommandInfo } from '../command.js';
-import { ExpandWildcard } from './expand-wildcard.js';
+import { ExpandWildcard, findWildcardToken } from './expand-wildcard.js';
 
 let parser: ExpandWildcard;
 let readPackage: Mock;
@@ -161,6 +161,22 @@ describe('#readPackage()', () => {
 
         const actualReadPackage = ExpandWildcard.readPackage();
         expect(actualReadPackage).toEqual(expectedPackage);
+    });
+});
+
+describe('#readDir()', () => {
+    it('returns directory entries', () => {
+        vi.spyOn(fs, 'readdirSync').mockReturnValue(['a.js', 'b.js'] as never);
+
+        expect(ExpandWildcard.readDir('some-dir')).toEqual(['a.js', 'b.js']);
+    });
+
+    it('returns [] when readdirSync throws', () => {
+        vi.spyOn(fs, 'readdirSync').mockImplementation(() => {
+            throw new Error('Error reading dir');
+        });
+
+        expect(ExpandWildcard.readDir('some-dir')).toEqual([]);
     });
 });
 
@@ -393,5 +409,43 @@ describe(`with a 'deno task' prefix`, () => {
 
         expect(readDeno).toHaveBeenCalledTimes(1);
         expect(readPackage).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('findWildcardToken', () => {
+    it('returns the first unquoted wildcard token with its offsets', () => {
+        const command = 'webpack --config webpack.config.*.js';
+        const token = 'webpack.config.*.js';
+        const start = command.indexOf(token);
+
+        expect(findWildcardToken(command)).toEqual({
+            token,
+            start,
+            end: start + token.length,
+        });
+    });
+
+    it('returns null when the only wildcard is inside quotes', () => {
+        expect(findWildcardToken('find . -name "*.js"')).toBeNull();
+    });
+
+    it('returns the unquoted wildcard token, skipping a quoted one', () => {
+        const command = "echo '*.txt' *.md";
+        const token = '*.md';
+        const start = command.indexOf(token);
+
+        expect(findWildcardToken(command)).toEqual({
+            token,
+            start,
+            end: start + token.length,
+        });
+    });
+
+    it('returns null when there is no wildcard', () => {
+        expect(findWildcardToken('ls -la')).toBeNull();
+    });
+
+    it('returns null when the wildcard token starts with a dash', () => {
+        expect(findWildcardToken('--flag=*.js')).toBeNull();
     });
 });
